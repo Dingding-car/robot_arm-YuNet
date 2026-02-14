@@ -1,0 +1,11 @@
+# 核心：忽略Python编译生成的__pycache__文件夹（所有目录下的都忽略）
+__pycache__/
+
+# 忽略各类Python字节码文件（覆盖不同版本/模式生成的编译文件）
+*.pyc
+*.pyo
+*.pyd
+*$py.class
+
+# 忽略测试文件
+test.py
