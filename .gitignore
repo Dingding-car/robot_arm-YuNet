@@ -7,5 +7,7 @@ __pycache__/
 *.pyd
 *$py.class
 
+/images
+
 # 忽略测试文件
 test.py
