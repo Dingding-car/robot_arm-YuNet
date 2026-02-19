@@ -9,6 +9,8 @@ import threading
 import ctypes
 import inspect
 import keyboard
+import queue
+import time
 
 # //* 舵机串口号
 SERVO_PORT = 'COM8'
@@ -40,8 +42,9 @@ def visualize(image, results, box_color=(0, 255, 0), text_color=(0, 0, 255), fps
 
     return output
 
+servo_queue = queue.Queue(maxsize=1)
 
-def capture_video():
+def capture_video(camera_id = 0, servo_manager = None):
 
     # YuNet模型初始化
     model_path = './model/face_detection_yunet_2023mar.onnx'
@@ -52,7 +55,7 @@ def capture_video():
                   topK=5000,
     )
 
-    deviceId = 0 # 摄像头设备ID
+    deviceId = camera_id # 摄像头设备ID,默认为0
     cap = cv2.VideoCapture(deviceId)
 
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -70,27 +73,101 @@ def capture_video():
 
         # Inference
         tm.start()
-        results = model.infer(frame) # results is a tuple
+        results = model.infer(frame) # results is a tuple shape[N,15]
         tm.stop()
+        
+        # 向舵机队列放入检测结果（非阻塞，避免阻塞主线程）
+        try:
+            # 放入结果、画面宽度、高度
+            servo_queue.put_nowait((results, w, h))
+        except queue.Full:
+            # 队列满时移除旧数据，放入新数据
+            servo_queue.get_nowait()
+            servo_queue.put_nowait((results, w, h))
 
-        # Draw results on the input image
         frame = visualize(frame, results, fps=tm.getFPS())
 
         # Visualize results in a new Window
         cv2.imshow('YuNet Demo', frame)
+
+        # servo_control(servo_manager, results, w, h)
 
         tm.reset()
     
     # 释放资源（必须执行，否则会导致摄像头被占用）
     cap.release()  # 释放摄像头
     cv2.destroyAllWindows()  # 关闭所有OpenCV窗口
+    
+    # 通知舵机线程停止
+    global stop_servo_thread
+    stop_servo_thread = True
+
+def servo_control(servo_manager, stop_servo_thread= False):
+    last_servo_time = time.time()
+    pan_angle = 0  # 初始化云台水平角度
+    tilt_angle = 0 # 初始化云台垂直角度
+    Kp = 0.3       # PID比例系数
+
+    while not stop_servo_thread:
+        try:
+            # 非阻塞获取队列数据
+            results, dispW, dispH = servo_queue.get_nowait()
+        except queue.Empty:
+            continue
+
+        if servo_manager is None or len(results) <= 0:
+            continue
+        
+        current_servo_time = time.time()
+        interval = current_servo_time - last_servo_time
+        # 控制舵机操作频率
+        if interval < 1:
+            print("Servo control interval: {:.2f}s, skipping...".format(interval))
+            continue
+        last_servo_time = current_servo_time
+        
+        face = results[0]
+        # 鼻尖坐标
+        nose_x = face[8]
+        nose_y = face[9]
+
+        # 计算误差
+        error_x = nose_x - dispW // 2
+        error_y = nose_y - dispH // 2
+
+        # 计算新的舵机角度
+        if abs(error_x) > 20:
+            pan_angle += Kp * error_x
+        if abs(error_y) > 20:
+            tilt_angle += Kp * error_y
+
+        # 限制角度范围
+        pan_angle = max(-90, min(90, pan_angle))
+        tilt_angle = max(-90, min(90, tilt_angle))
+
+        # 执行舵机控制（耗时操作，在独立线程中执行）
+        servo_manager.set_servo_angle(0, pan_angle)
+        servo_manager.set_servo_angle(2, tilt_angle)
 
 # 主函数
 def main():
     servo_manager = Arm5DoFUServo(device=SERVO_PORT, is_init_pose= False)
     servo_manager.home()
-    servo_manager.set_damping(1000)
-    capture_video()
+    # servo_manager.set_damping(1000)
+
+    # 启动舵机控制线程
+    servo_thread = threading.Thread(target=servo_control, args=(servo_manager,), daemon=True)
+    servo_thread.start()
+    print("舵机控制线程已启动")
+
+    # capture_video(camera_id=0)
+
+    # 等待舵机线程结束
+    # servo_thread.join(timeout=1)
+    # print("舵机正常退出")
+    # # 舵机归位（可选） 
+    # servo_manager.home()
+
 
 
 if __name__ == "__main__":
