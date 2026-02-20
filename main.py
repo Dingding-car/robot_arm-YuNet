@@ -1,14 +1,14 @@
 import cv2
 import numpy as np
+
 import sys
 sys.path.append('./kinematic')
-from kinematic.arm5dof_uservo import Arm5DoFUServo
 
+from kinematic.arm5dof_uservo import Arm5DoFUServo
 from model.yunet import YuNet
+from model.PIDController import PIDController2D
+
 import threading
-import ctypes
-import inspect
-import keyboard
 import queue
 import time
 
@@ -42,8 +42,8 @@ def visualize(image, results, box_color=(0, 255, 0), text_color=(0, 0, 255), fps
 
     return output
 
+# 检测结果队列（用于主线程和舵机控制线程之间的通信）
 servo_queue = queue.Queue(maxsize=1)
-
 def capture_video(camera_id = 0, servo_manager = None):
 
     # YuNet模型初始化
@@ -103,51 +103,84 @@ def capture_video(camera_id = 0, servo_manager = None):
     stop_servo_thread = True
 
 def servo_control(servo_manager, stop_servo_thread= False):
-    last_servo_time = time.time()
-    pan_angle = 0  # 初始化云台水平角度
-    tilt_angle = 0 # 初始化云台垂直角度
-    Kp = 0.3       # PID比例系数
+
+    # PID参数设置
+    Kp = (0.05, 0.2)
+    Ki = (0.015, 0.01)
+    Kd = (0.06, 0.05)
+
+    # 初始化二维PID控制器
+    # 可针对X/Y设置不同参数：比如水平响应快一点，垂直稳一点
+    pid_2d = PIDController2D(
+        kp=Kp,
+        ki=Ki,
+        kd=Kd,
+        min_output=(-90, -90),  # X/Y输出下限
+        max_output=(90, 90),    # X/Y输出上限
+        integral_limit=50       # 积分限幅
+    )
+
+    servo_raw_angle = servo_manager.get_servo_angle_list()
+    pan_angle = servo_raw_angle[0]  # 初始化云台水平角度
+    tilt_angle = servo_raw_angle[2] # 初始化云台垂直角度
 
     while not stop_servo_thread:
         try:
             # 非阻塞获取队列数据
             results, dispW, dispH = servo_queue.get_nowait()
         except queue.Empty:
+            time.sleep(0.01)
             continue
 
         if servo_manager is None or len(results) <= 0:
+            pid_2d.reset()
             continue
         
-        current_servo_time = time.time()
-        interval = current_servo_time - last_servo_time
-        # 控制舵机操作频率
-        if interval < 1:
-            print("Servo control interval: {:.2f}s, skipping...".format(interval))
-            continue
-        last_servo_time = current_servo_time
         
         face = results[0]
         # 鼻尖坐标
-        nose_x = face[8]
-        nose_y = face[9]
+        nose = (face[8], face[9])   # (nose_x, nose_y)
 
-        # 计算误差
-        error_x = nose_x - dispW // 2
-        error_y = nose_y - dispH // 2
+        # 设定点
+        setpoint = (dispW // 2, dispH // 2)
 
-        # 计算新的舵机角度
-        if abs(error_x) > 20:
-            pan_angle += Kp * error_x
-        if abs(error_y) > 20:
-            tilt_angle += Kp * error_y
+        # PID输出
+        pid_output = pid_2d.compute(nose, setpoint)
 
-        # 限制角度范围
-        pan_angle = max(-90, min(90, pan_angle))
-        tilt_angle = max(-90, min(90, tilt_angle))
+        pan_angle = pid_output[0]
+        tilt_angle = -pid_output[1]
 
-        # 执行舵机控制（耗时操作，在独立线程中执行）
-        servo_manager.set_servo_angle(0, pan_angle)
-        servo_manager.set_servo_angle(2, tilt_angle)
+        # 最终角度限位（双重保险）
+        pan_angle = np.clip(pan_angle, -90, 90)
+        tilt_angle = np.clip(tilt_angle, -90, 90)
+
+        # 执行舵机控制
+        try:
+            servo_manager.uservo.set_servo_angle(0, pan_angle)
+            servo_manager.uservo.set_servo_angle(2, tilt_angle)
+            print(f"二维PID输出 | 水平角度: {pan_angle:.1f}° | 垂直角度: {tilt_angle:.1f}° | "
+                  f"设定点: {setpoint} | 反馈点: {nose}")
+        except Exception as e:
+            print(f"舵机控制异常: {e}")
+            continue
+
+        # # 计算误差
+        # error_x = nose_x - dispW // 2
+        # error_y = nose_y - dispH // 2
+
+        # # 计算新的舵机角度
+        # if abs(error_x) > 20:
+        #     pan_angle += Kp * error_x
+        # if abs(error_y) > 20:
+        #     tilt_angle -= Kp * error_y
+
+        # # 限制角度范围
+        # pan_angle = max(-90, min(90, pan_angle))
+        # tilt_angle = max(-90, min(90, tilt_angle))
+
+        # # 执行舵机控制（耗时操作，在独立线程中执行）
+        # servo_manager.uservo.set_servo_angle(0, pan_angle)
+        # servo_manager.uservo.set_servo_angle(2, tilt_angle)
 
 # 主函数
 def main():
@@ -160,13 +193,14 @@ def main():
     servo_thread.start()
     print("舵机控制线程已启动")
 
-    # capture_video(camera_id=0)
+    capture_video(camera_id=0)
 
     # 等待舵机线程结束
-    # servo_thread.join(timeout=1)
-    # print("舵机正常退出")
-    # # 舵机归位（可选） 
-    # servo_manager.home()
+    servo_thread.join(timeout=1)
+    print("舵机正常退出")
+    # 舵机归位（可选） 
+    servo_manager.home()
+    servo_manager.set_damping(1000)
 
 
 
