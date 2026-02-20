@@ -30,8 +30,8 @@ class PIDController2D:
         """内部方法：计算单个维度（x/y）的PID输出"""
         current_time = time.time()
         dt = current_time - self.state[dim]['last_time']
-        if dt < 1e-6:
-            dt = 1e-6
+        MIN_DT = 1e-5  # 最小时间间隔，防止除零
+        dt = max(dt, MIN_DT)
 
         # 1. 计算当前误差
         error = setpoint - feedback

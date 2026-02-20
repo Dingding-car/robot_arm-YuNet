@@ -1,5 +1,8 @@
 import cv2
 import numpy as np
+import threading
+import queue
+import time
 
 import sys
 sys.path.append('./kinematic')
@@ -8,9 +11,6 @@ from kinematic.arm5dof_uservo import Arm5DoFUServo
 from model.yunet import YuNet
 from model.PIDController import PIDController2D
 
-import threading
-import queue
-import time
 
 # //* 舵机串口号
 SERVO_PORT = 'COM8'
@@ -58,6 +58,13 @@ def capture_video(camera_id = 0):
     deviceId = camera_id # 摄像头设备ID,默认为0
     cap = cv2.VideoCapture(deviceId)
 
+    # 检查视频是否成功打开
+    global stop_servo_thread
+    if not cap.isOpened():
+        print("Error: Could not open video.")
+        stop_servo_thread = True
+        return
+
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     model.setInputSize([w, h])
@@ -97,15 +104,14 @@ def capture_video(camera_id = 0):
     cv2.destroyAllWindows()  # 关闭所有OpenCV窗口
     
     # 通知舵机线程停止
-    global stop_servo_thread
     stop_servo_thread = True
 
 def servo_control(servo_manager, stop_servo_thread= False):
 
     # PID参数设置
-    Kp = (0.05, 0.2)
-    Ki = (0.015, 0.01)
-    Kd = (0.06, 0.05)
+    Kp = (1e-2, 5e-3)
+    Ki = (1e-3, 1e-3)
+    Kd = (0, 0)
 
     # 初始化二维PID控制器
     # 可针对X/Y设置不同参数：比如水平响应快一点，垂直稳一点
@@ -115,7 +121,7 @@ def servo_control(servo_manager, stop_servo_thread= False):
         kd=Kd,
         min_output=(-90, -90),  # X/Y输出下限
         max_output=(90, 90),    # X/Y输出上限
-        integral_limit=50       # 积分限幅
+        integral_limit=10       # 积分限幅
     )
 
     servo_raw_angle = servo_manager.get_servo_angle_list()
@@ -143,21 +149,22 @@ def servo_control(servo_manager, stop_servo_thread= False):
         setpoint = (dispW // 2, dispH // 2)
 
         # PID输出
-        pid_output = pid_2d.compute(nose, setpoint)
+        pid_output = pid_2d.compute(setpoint_2d= setpoint, feedback_2d= nose)
 
-        pan_angle = pid_output[0]
-        tilt_angle = -pid_output[1]
+        pan_angle -= pid_output[0]
+        tilt_angle += pid_output[1]
 
         # 最终角度限位（双重保险）
         pan_angle = np.clip(pan_angle, -90, 90)
         tilt_angle = np.clip(tilt_angle, -90, 90)
 
+
         # 执行舵机控制
         try:
             servo_manager.uservo.set_servo_angle(0, pan_angle)
             servo_manager.uservo.set_servo_angle(2, tilt_angle)
-            print(f"二维PID输出 | 水平角度: {pan_angle:.1f}° | 垂直角度: {tilt_angle:.1f}° | "
-                  f"设定点: {setpoint} | 反馈点: {nose}")
+            # print(f"二维PID输出 | 水平角度: {pan_angle:.1f}° | 垂直角度: {tilt_angle:.1f}° | "
+            #       f"设定点: {setpoint} | 反馈点: {nose}")
         except Exception as e:
             print(f"舵机控制异常: {e}")
             continue
@@ -179,9 +186,16 @@ def main():
     # 等待舵机线程结束
     servo_thread.join(timeout=1)
     print("舵机正常退出")
-    # 舵机归位（可选） 
+
+    # servo_manager.set_joint_angle("joint1", math.radians(0))    # [-90, 90]
+    # servo_manager.set_joint_angle("joint2", math.radians(-60))  # [-180, 0]
+    # servo_manager.set_joint_angle("joint3", math.radians(0))   # [-90. 90]
+    # servo_manager.set_joint_angle("joint4", math.radians(0))   # [-90, 90]
+    # servo_manager.set_joint_angle("joint5", math.radians(0)) # [-90, 90]
+    
+    # 舵机归位
     servo_manager.home()
-    servo_manager.set_damping(1000)
+    servo_manager.set_damping(1200)
 
 
 
