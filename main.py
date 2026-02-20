@@ -44,7 +44,7 @@ def visualize(image, results, box_color=(0, 255, 0), text_color=(0, 0, 255), fps
 
 # 检测结果队列（用于主线程和舵机控制线程之间的通信）
 servo_queue = queue.Queue(maxsize=1)
-def capture_video(camera_id = 0, servo_manager = None):
+def capture_video(camera_id = 0):
 
     # YuNet模型初始化
     model_path = './model/face_detection_yunet_2023mar.onnx'
@@ -89,8 +89,6 @@ def capture_video(camera_id = 0, servo_manager = None):
 
         # Visualize results in a new Window
         cv2.imshow('YuNet Demo', frame)
-
-        # servo_control(servo_manager, results, w, h)
 
         tm.reset()
     
@@ -164,23 +162,6 @@ def servo_control(servo_manager, stop_servo_thread= False):
             print(f"舵机控制异常: {e}")
             continue
 
-        # # 计算误差
-        # error_x = nose_x - dispW // 2
-        # error_y = nose_y - dispH // 2
-
-        # # 计算新的舵机角度
-        # if abs(error_x) > 20:
-        #     pan_angle += Kp * error_x
-        # if abs(error_y) > 20:
-        #     tilt_angle -= Kp * error_y
-
-        # # 限制角度范围
-        # pan_angle = max(-90, min(90, pan_angle))
-        # tilt_angle = max(-90, min(90, tilt_angle))
-
-        # # 执行舵机控制（耗时操作，在独立线程中执行）
-        # servo_manager.uservo.set_servo_angle(0, pan_angle)
-        # servo_manager.uservo.set_servo_angle(2, tilt_angle)
 
 # 主函数
 def main():

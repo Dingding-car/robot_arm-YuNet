@@ -14,3 +14,6 @@ test.py
 
 # 忽略VSCode配置文件
 .vscode/
+
+# 忽略临时运行文件
+tempCodeRunnerFile.py
