@@ -42,18 +42,23 @@ def visualize(image, results, box_color=(0, 255, 0), text_color=(0, 0, 255), fps
 
     return output
 
-# 检测结果队列（用于主线程和舵机控制线程之间的通信）
-servo_queue = queue.Queue(maxsize=1)
-def capture_video(camera_id = 0):
-
+def init_YuNet(model_path):
     # YuNet模型初始化
-    model_path = './model/face_detection_yunet_2023mar.onnx'
     model = YuNet(modelPath=model_path,
                   inputSize=[320, 320],
                   confThreshold=0.9,
                   nmsThreshold=0.3,
                   topK=5000,
     )
+    return model
+
+# 检测结果队列（用于主线程和舵机控制线程之间的通信）
+servo_queue = queue.Queue(maxsize=1)
+def capture_video(camera_id = 0):
+
+    # # YuNet模型初始化
+    YN_model_path = './model/face_detection_yunet_2023mar.onnx'
+    model = init_YuNet(YN_model_path)
 
     deviceId = camera_id # 摄像头设备ID,默认为0
     cap = cv2.VideoCapture(deviceId)
@@ -174,7 +179,6 @@ def servo_control(servo_manager, stop_servo_thread= False):
 def main():
     servo_manager = Arm5DoFUServo(device=SERVO_PORT, is_init_pose= False)
     servo_manager.home()
-    # servo_manager.set_damping(1000)
 
     # 启动舵机控制线程
     servo_thread = threading.Thread(target=servo_control, args=(servo_manager,), daemon=True)
@@ -187,11 +191,6 @@ def main():
     servo_thread.join(timeout=1)
     print("舵机正常退出")
 
-    # servo_manager.set_joint_angle("joint1", math.radians(0))    # [-90, 90]
-    # servo_manager.set_joint_angle("joint2", math.radians(-60))  # [-180, 0]
-    # servo_manager.set_joint_angle("joint3", math.radians(0))   # [-90. 90]
-    # servo_manager.set_joint_angle("joint4", math.radians(0))   # [-90, 90]
-    # servo_manager.set_joint_angle("joint5", math.radians(0)) # [-90, 90]
     
     # 舵机归位
     servo_manager.home()
