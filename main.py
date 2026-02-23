@@ -223,24 +223,24 @@ def servo_control(servo_manager, stop_servo_thread= False):
 def main():
     # //TODO 舵机串口号
     SERVO_PORT = 'COM14'
-    # servo_manager = Arm5DoFUServo(device=SERVO_PORT, is_init_pose= False)
-    # servo_manager.home()
+    servo_manager = Arm5DoFUServo(device=SERVO_PORT, is_init_pose= False)
+    servo_manager.home()
 
-    # # 启动舵机控制线程
-    # servo_thread = threading.Thread(target=servo_control, args=(servo_manager,), daemon=True)
-    # servo_thread.start()
-    # print("舵机控制线程已启动")
+    # 启动舵机控制线程
+    servo_thread = threading.Thread(target=servo_control, args=(servo_manager,), daemon=True)
+    servo_thread.start()
+    print("舵机控制线程已启动")
 
     capture_video(camera_id=0)
 
     # 等待舵机线程结束
-    # servo_thread.join(timeout=1)
-    # print("舵机正常退出")
+    servo_thread.join(timeout=1)
+    print("舵机正常退出")
 
     
-    # # 舵机归位
-    # servo_manager.home()
-    # servo_manager.set_damping(1200)
+    # 舵机归位
+    servo_manager.home()
+    servo_manager.set_damping(1200)
 
 
 
