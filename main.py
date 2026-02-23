@@ -13,11 +13,9 @@ from model.sface import SFace
 from model.PIDController import PIDController2D
 
 
-# //TODO 舵机串口号
-SERVO_PORT = 'COM12'
 
 # 人脸检测可视化函数
-def visualize(image, results, matches=None, scores=None, box_color=(0, 255, 0), text_color=(0, 0, 255), fps=None):
+def visualize(image, results, matches=None, scores=None, box_color=(0, 255, 0), text_color=(255, 0, 255), fps=None):
     output = image.copy()
     landmark_color = [
         (255,   0,   0), # right eye
@@ -37,25 +35,26 @@ def visualize(image, results, matches=None, scores=None, box_color=(0, 255, 0), 
         cv2.putText(output, 'FPS: {:.2f}'.format(fps), (0, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, text_color)
 
     for idx, det in enumerate(results):
-        # 动态设置框颜色：匹配目标人脸=红色，未匹配=绿色
+        # 动态设置框颜色：匹配目标人脸=绿色，未匹配=红色
         current_box_color = box_color
         if idx < len(matches):
-            current_box_color = (0, 0, 255) if matches[idx] else (0, 255, 0)
+            current_box_color = (0, 255, 0) if matches[idx] else (0, 0, 255)
 
         bbox = det[0:4].astype(np.int32)
         cv2.rectangle(output, (bbox[0], bbox[1]), (bbox[0]+bbox[2], bbox[1]+bbox[3]), current_box_color, 2)
 
+        # 检测置信度
         conf = det[-1]
-        cv2.putText(output, '{:.4f}'.format(conf), (bbox[0], bbox[1]+12), cv2.FONT_HERSHEY_DUPLEX, 0.5, text_color)
+        cv2.putText(output, 'DET:{:.2f}'.format(conf), (bbox[0]+2, bbox[1]+14), cv2.FONT_HERSHEY_DUPLEX, 0.5, current_box_color)
 
         # 显示匹配分数和匹配状态（仅当有匹配结果时）
         if idx < len(scores) and idx < len(matches):
             # 匹配分数
-            score_text = 'Match score: {:.4f}'.format(scores[idx])
-            cv2.putText(output, score_text, (bbox[0], bbox[1]+27), cv2.FONT_HERSHEY_DUPLEX, 0.5, text_color)
-            # 匹配状态（文字颜色和框颜色一致）
+            score_text = 'MAT: {:.2f}'.format(scores[idx])
+            cv2.putText(output, score_text, (bbox[0]+2, bbox[1]+30), cv2.FONT_HERSHEY_DUPLEX, 0.5, current_box_color)
+            # 匹配状态
             match_text = 'Matched' if matches[idx] else 'Not matched'
-            cv2.putText(output, match_text, (bbox[0], bbox[1]+42), cv2.FONT_HERSHEY_DUPLEX, 0.5, current_box_color)
+            cv2.putText(output, match_text, (bbox[0], bbox[1]-8), cv2.FONT_HERSHEY_DUPLEX, 0.5, current_box_color)
 
         landmarks = det[4:14].astype(np.int32).reshape((5,2))
         for idx, landmark in enumerate(landmarks):
@@ -103,7 +102,7 @@ def capture_video(camera_id = 0):
         return
     
     # 检测目标人脸
-    target = cv2.imread('./images/target.jpg')
+    target = cv2.imread('./images/target3.jpg')
     detector.setInputSize([target.shape[1], target.shape[0]])
     target_face = detector.infer(target)
     assert target_face.shape[0] > 0, 'Cannot find a face in target'
@@ -116,6 +115,8 @@ def capture_video(camera_id = 0):
 
     print('Press "q" to quit the demo.')
     while cv2.waitKey(1) != ord('q'):
+        tm.start()
+
         hasFrame, frame = cap.read()
         if not hasFrame:
             print('No frames grabbed!')
@@ -124,13 +125,11 @@ def capture_video(camera_id = 0):
         # Inference and match
         scores = []
         matches = []
-        tm.start()
         detected_faces = detector.infer(frame) # results is a tuple shape[N,15]
         for face in detected_faces:
             recognized_face = recognizer.match(target, target_face[0][:-1], frame, face[:-1])
             scores.append(recognized_face[0])
             matches.append(recognized_face[1])
-        tm.stop()
         
         # 向舵机队列放入检测结果（非阻塞，避免阻塞主线程）
         try:
@@ -141,6 +140,7 @@ def capture_video(camera_id = 0):
             servo_queue.get_nowait()
             servo_queue.put_nowait((detected_faces, w, h))
 
+        tm.stop()
         frame = visualize(frame, detected_faces, matches=matches, scores=scores ,fps=tm.getFPS())
 
         # Visualize results in a new Window
@@ -221,24 +221,26 @@ def servo_control(servo_manager, stop_servo_thread= False):
 
 # 主函数
 def main():
-    servo_manager = Arm5DoFUServo(device=SERVO_PORT, is_init_pose= False)
-    servo_manager.home()
+    # //TODO 舵机串口号
+    SERVO_PORT = 'COM14'
+    # servo_manager = Arm5DoFUServo(device=SERVO_PORT, is_init_pose= False)
+    # servo_manager.home()
 
-    # 启动舵机控制线程
-    servo_thread = threading.Thread(target=servo_control, args=(servo_manager,), daemon=True)
-    servo_thread.start()
-    print("舵机控制线程已启动")
+    # # 启动舵机控制线程
+    # servo_thread = threading.Thread(target=servo_control, args=(servo_manager,), daemon=True)
+    # servo_thread.start()
+    # print("舵机控制线程已启动")
 
     capture_video(camera_id=0)
 
     # 等待舵机线程结束
-    servo_thread.join(timeout=1)
-    print("舵机正常退出")
+    # servo_thread.join(timeout=1)
+    # print("舵机正常退出")
 
     
-    # 舵机归位
-    servo_manager.home()
-    servo_manager.set_damping(1200)
+    # # 舵机归位
+    # servo_manager.home()
+    # servo_manager.set_damping(1200)
 
 
 
