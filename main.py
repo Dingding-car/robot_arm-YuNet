@@ -11,6 +11,7 @@ from kinematic.arm5dof_uservo import Arm5DoFUServo
 from model.yunet import YuNet
 from model.sface import SFace
 from model.PIDController import PIDController2D
+from ch340_detector import detect_ch340_port
 
 
 
@@ -222,8 +223,13 @@ def servo_control(servo_manager, stop_servo_thread= False):
 # 主函数
 def main():
     # //TODO 舵机串口号
-    SERVO_PORT = 'COM14'
+    print("=" * 50)
+    SERVO_PORT = detect_ch340_port()
+    print(f"端口号:{SERVO_PORT}")
+    print("=" * 50)
+    
     servo_manager = Arm5DoFUServo(device=SERVO_PORT, is_init_pose= False)
+    print("机械臂回正")
     servo_manager.home()
 
     # 启动舵机控制线程
